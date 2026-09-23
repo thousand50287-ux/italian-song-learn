@@ -22,6 +22,8 @@ export interface LyricLine {
   id: string;
   it: string;
   zh: string;
+  /** Seconds from track start when this line begins (for play-synced lyrics). */
+  startSec?: number;
   /** Token indices (0-based) that are key phrases; or phrase markers */
   isKeyPhrase?: boolean;
   keyPhraseId?: string;
@@ -73,6 +75,10 @@ export interface Song {
   artist: string;
   year: number;
   youtubeSearch: string;
+  /** Official / public YouTube video id for embedded play-synced lyrics. */
+  youtubeId?: string;
+  /** Added to line.startSec when matching player time (seconds). Default 0. */
+  syncOffsetSec?: number;
   summary: string;
   lines: LyricLine[];
   keyPhrases: KeyPhrase[];
