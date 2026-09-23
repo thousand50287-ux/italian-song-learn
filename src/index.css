@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-terracotta-50: #fdf6f3;
+  --color-terracotta-100: #f8e8e0;
+  --color-terracotta-200: #f0d0c0;
+  --color-terracotta-300: #e4b09a;
+  --color-terracotta-400: #d4896e;
+  --color-terracotta-500: #c46b4a;
+  --color-terracotta-600: #b0553c;
+  --color-terracotta-700: #934433;
+  --color-terracotta-800: #783a2e;
+  --color-terracotta-900: #633229;
+  --color-cream: #faf7f2;
+  --color-ink: #2c241c;
+  --font-sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-display: "Noto Serif TC", "Noto Sans TC", serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-cream);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
