@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { ClozeBlank, Song } from '../../data/types';
+import type { ClozeBlank, ClozeOption, Song } from '../../data/types';
 import { wordTokens } from '../../utils/tokenize';
 
 interface Props {
@@ -16,13 +16,32 @@ function isAnswerCorrect(user: string, answer: string): boolean {
   return user.trim().toLowerCase() === answer.trim().toLowerCase();
 }
 
+/** Stable shuffle so order differs per blank but does not jump on re-render. */
+function shuffleOptions(options: ClozeOption[], seed: string): ClozeOption[] {
+  const arr = [...options];
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  for (let i = arr.length - 1; i > 0; i--) {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    const j = Math.abs(h) % (i + 1);
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
 export default function ClozeTab({ song }: Props) {
   const blanks = song.cloze;
   const total = blanks.length;
 
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<BlankKey, string>>({});
-  /** Per-blank: whether user has locked in an attempt (choice click or type submit). */
   const [locked, setLocked] = useState<Record<BlankKey, boolean>>({});
   const [mode, setMode] = useState<'choice' | 'type'>('choice');
   const [draft, setDraft] = useState('');
@@ -33,6 +52,11 @@ export default function ClozeTab({ song }: Props) {
   const currentLine = current
     ? song.lines.find((l) => l.id === current.lineId)
     : undefined;
+
+  const shuffledOptions = useMemo(() => {
+    if (!current?.options?.length || !currentKey) return [];
+    return shuffleOptions(current.options, currentKey);
+  }, [current, currentKey]);
 
   const answeredCount = useMemo(
     () => blanks.filter((b) => locked[blankKey(b)]).length,
@@ -104,7 +128,7 @@ export default function ClozeTab({ song }: Props) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-stone-500">
-          一次一題。選完或送出後立刻知道對錯，再進下一題。
+          一次一題。選完後立刻對錯，並可看四個選項的詞性與意思。
         </p>
         <div className="flex rounded-full border border-stone-200 bg-white p-0.5 text-xs">
           <button
@@ -197,16 +221,16 @@ export default function ClozeTab({ song }: Props) {
         )}
       </div>
 
-      {!isLocked && mode === 'choice' && current.options && (
+      {!isLocked && mode === 'choice' && shuffledOptions.length > 0 && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {current.options.map((opt) => (
+          {shuffledOptions.map((opt) => (
             <button
-              key={opt}
+              key={opt.it}
               type="button"
-              onClick={() => lockAnswer(opt)}
+              onClick={() => lockAnswer(opt.it)}
               className="min-h-12 rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-base text-stone-800 shadow-sm transition hover:border-terracotta-400 hover:bg-terracotta-50"
             >
-              {opt}
+              <span className="font-display">{opt.it}</span>
             </button>
           ))}
         </div>
@@ -241,28 +265,48 @@ export default function ClozeTab({ song }: Props) {
         </form>
       )}
 
-      {isLocked && mode === 'choice' && current.options && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {current.options.map((opt) => {
-            const picked = userAnswer === opt;
-            const right = isAnswerCorrect(opt, current.answer);
-            let style =
-              'border-stone-200 bg-stone-50 text-stone-400';
-            if (right) {
-              style = 'border-emerald-400 bg-emerald-50 text-emerald-900';
-            } else if (picked) {
-              style = 'border-rose-300 bg-rose-50 text-rose-800';
-            }
-            return (
-              <div
-                key={opt}
-                className={`min-h-12 rounded-xl border px-4 py-3 text-left text-base ${style}`}
-              >
-                {opt}
-                {right ? ' ✓' : picked ? ' ✗' : ''}
-              </div>
-            );
-          })}
+      {isLocked && shuffledOptions.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">選項詳解</p>
+          <ul className="space-y-2">
+            {shuffledOptions.map((opt) => {
+              const right = isAnswerCorrect(opt.it, current.answer);
+              const picked = isAnswerCorrect(opt.it, userAnswer);
+              let box =
+                'border-stone-200 bg-white text-stone-700';
+              if (right) {
+                box = 'border-emerald-300 bg-emerald-50 text-emerald-950';
+              } else if (picked) {
+                box = 'border-rose-300 bg-rose-50 text-rose-950';
+              }
+              return (
+                <li
+                  key={opt.it}
+                  className={`rounded-xl border px-4 py-3 ${box}`}
+                >
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="font-display text-base font-semibold">
+                      {opt.it}
+                    </span>
+                    <span className="rounded-full bg-white/70 px-2 py-0.5 text-[11px] text-stone-600">
+                      {opt.pos}
+                    </span>
+                    {right && (
+                      <span className="text-xs font-medium text-emerald-700">
+                        正確答案
+                      </span>
+                    )}
+                    {!right && picked && (
+                      <span className="text-xs font-medium text-rose-700">
+                        你選的
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm leading-relaxed">{opt.gloss}</p>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 
@@ -329,15 +373,9 @@ export default function ClozeTab({ song }: Props) {
               title={`第 ${i + 1} 題`}
               onClick={() => goTo(i)}
               className={`h-2.5 w-2.5 rounded-full transition ${
-                active
-                  ? 'ring-2 ring-terracotta-400 ring-offset-1'
-                  : ''
+                active ? 'ring-2 ring-terracotta-400 ring-offset-1' : ''
               } ${
-                done
-                  ? ok
-                    ? 'bg-emerald-500'
-                    : 'bg-rose-400'
-                  : 'bg-stone-300'
+                done ? (ok ? 'bg-emerald-500' : 'bg-rose-400') : 'bg-stone-300'
               }`}
               aria-label={`第 ${i + 1} 題`}
             />

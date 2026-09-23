@@ -53,12 +53,21 @@ export interface GrammarLesson {
   exampleZh?: string;
 }
 
+export interface ClozeOption {
+  /** Display / match text (same form as used in the lyric blank). */
+  it: string;
+  pos: Pos;
+  /** Short Traditional Chinese gloss for post-answer explanation. */
+  gloss: string;
+}
+
 export interface ClozeBlank {
   lineId: string;
   /** Word index in the Italian line (split by spaces, punctuation attached) */
   wordIndex: number;
   answer: string;
-  options?: string[];
+  /** Four choices; correct one matches `answer` (case-insensitive). UI shuffles order. */
+  options?: ClozeOption[];
 }
 
 export interface QuizQuestion {
