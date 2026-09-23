@@ -12,64 +12,99 @@ function blankKey(b: ClozeBlank): BlankKey {
   return `${b.lineId}:${b.wordIndex}`;
 }
 
+function isAnswerCorrect(user: string, answer: string): boolean {
+  return user.trim().toLowerCase() === answer.trim().toLowerCase();
+}
+
 export default function ClozeTab({ song }: Props) {
-  const blanksByLine = useMemo(() => {
-    const map = new Map<string, ClozeBlank[]>();
-    for (const b of song.cloze) {
-      const list = map.get(b.lineId) ?? [];
-      list.push(b);
-      map.set(b.lineId, list);
-    }
-    return map;
-  }, [song.cloze]);
+  const blanks = song.cloze;
+  const total = blanks.length;
 
+  const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<BlankKey, string>>({});
+  /** Per-blank: whether user has locked in an attempt (choice click or type submit). */
+  const [locked, setLocked] = useState<Record<BlankKey, boolean>>({});
   const [mode, setMode] = useState<'choice' | 'type'>('choice');
-  const [checked, setChecked] = useState(false);
-  const [revealed, setRevealed] = useState(false);
-  const [activeBlank, setActiveBlank] = useState<BlankKey | null>(
-    song.cloze[0] ? blankKey(song.cloze[0]) : null,
+  const [draft, setDraft] = useState('');
+
+  const safeIndex = total === 0 ? 0 : Math.min(Math.max(index, 0), total - 1);
+  const current = total > 0 ? blanks[safeIndex] : null;
+  const currentKey = current ? blankKey(current) : null;
+  const currentLine = current
+    ? song.lines.find((l) => l.id === current.lineId)
+    : undefined;
+
+  const answeredCount = useMemo(
+    () => blanks.filter((b) => locked[blankKey(b)]).length,
+    [blanks, locked],
   );
-
-  const total = song.cloze.length;
-  const score = useMemo(() => {
-    if (!checked && !revealed) return null;
-    let correct = 0;
-    for (const b of song.cloze) {
-      const user = (answers[blankKey(b)] ?? '').trim();
-      if (user.toLowerCase() === b.answer.toLowerCase()) correct += 1;
+  const correctCount = useMemo(() => {
+    let n = 0;
+    for (const b of blanks) {
+      const key = blankKey(b);
+      if (!locked[key]) continue;
+      if (isAnswerCorrect(answers[key] ?? '', b.answer)) n += 1;
     }
-    return correct;
-  }, [answers, checked, revealed, song.cloze]);
+    return n;
+  }, [answers, blanks, locked]);
 
-  const active = song.cloze.find((b) => blankKey(b) === activeBlank);
+  const userAnswer = currentKey ? (answers[currentKey] ?? '') : '';
+  const isLocked = currentKey ? !!locked[currentKey] : false;
+  const isCorrect =
+    isLocked && current ? isAnswerCorrect(userAnswer, current.answer) : false;
+  const isWrong = isLocked && current && !isCorrect;
+  const allDone = total > 0 && answeredCount === total;
 
-  function setAnswer(key: BlankKey, value: string) {
-    setAnswers((prev) => ({ ...prev, [key]: value }));
-    setChecked(false);
+  function goTo(i: number) {
+    const next = Math.min(Math.max(i, 0), Math.max(total - 1, 0));
+    setIndex(next);
+    const b = blanks[next];
+    if (b) {
+      const key = blankKey(b);
+      setDraft(locked[key] ? answers[key] ?? '' : '');
+    } else {
+      setDraft('');
+    }
+  }
+
+  function lockAnswer(value: string) {
+    if (!current || !currentKey || isLocked) return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    setAnswers((prev) => ({ ...prev, [currentKey]: trimmed }));
+    setLocked((prev) => ({ ...prev, [currentKey]: true }));
+    setDraft(trimmed);
   }
 
   function reset() {
     setAnswers({});
-    setChecked(false);
-    setRevealed(false);
-    setActiveBlank(song.cloze[0] ? blankKey(song.cloze[0]) : null);
+    setLocked({});
+    setDraft('');
+    setIndex(0);
   }
 
-  function revealAll() {
-    const filled: Record<BlankKey, string> = {};
-    for (const b of song.cloze) filled[blankKey(b)] = b.answer;
-    setAnswers(filled);
-    setRevealed(true);
-    setChecked(true);
+  function revealCurrent() {
+    if (!current || !currentKey) return;
+    setAnswers((prev) => ({ ...prev, [currentKey]: current.answer }));
+    setLocked((prev) => ({ ...prev, [currentKey]: true }));
+    setDraft(current.answer);
   }
+
+  if (!current || !currentLine || !currentKey) {
+    return (
+      <p className="rounded-2xl border border-stone-100 bg-white px-4 py-8 text-center text-stone-500">
+        尚無填空題。
+      </p>
+    );
+  }
+
+  const words = wordTokens(currentLine.it);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-stone-500">
-          約 {Math.round((total / song.lines.reduce((n, l) => n + wordTokens(l.it).length, 0)) * 100)}%
-          內容詞已挖空。可邊聽官方錄音邊填。
+          一次一題。選完或送出後立刻知道對錯，再進下一題。
         </p>
         <div className="flex rounded-full border border-stone-200 bg-white p-0.5 text-xs">
           <button
@@ -81,7 +116,10 @@ export default function ClozeTab({ song }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => setMode('type')}
+            onClick={() => {
+              setMode('type');
+              setDraft(isLocked ? userAnswer : '');
+            }}
             className={`rounded-full px-3 py-1.5 ${mode === 'type' ? 'bg-terracotta-500 text-white' : 'text-stone-600'}`}
           >
             輸入
@@ -89,135 +127,222 @@ export default function ClozeTab({ song }: Props) {
         </div>
       </div>
 
-      <ul className="space-y-2 rounded-2xl border border-stone-100 bg-white p-4">
-        {song.lines.map((line) => {
-          const words = wordTokens(line.it);
-          const blanks = blanksByLine.get(line.id) ?? [];
-          const blankMap = new Map(blanks.map((b) => [b.wordIndex, b]));
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="font-medium text-terracotta-700">
+          第 {safeIndex + 1} / {total} 題
+        </span>
+        <span className="text-stone-500">
+          已答 {answeredCount} · 對 {correctCount}
+        </span>
+      </div>
 
-          return (
-            <li key={line.id} className="font-display text-base leading-relaxed text-ink sm:text-lg">
-              {words.map((w, wi) => {
-                const blank = blankMap.get(wi);
-                if (!blank) {
-                  return (
-                    <span key={wi} className="mr-1.5 inline-block">
-                      {w}
-                    </span>
-                  );
-                }
-                const key = blankKey(blank);
-                const user = answers[key] ?? '';
-                const isActive = activeBlank === key;
-                const isCorrect =
-                  (checked || revealed) && user.toLowerCase() === blank.answer.toLowerCase();
-                const isWrong =
-                  (checked || revealed) && user.length > 0 && !isCorrect;
+      <div
+        className={`rounded-2xl border px-5 py-6 sm:px-6 sm:py-8 ${
+          isCorrect
+            ? 'border-emerald-200 bg-emerald-50/60'
+            : isWrong
+              ? 'border-rose-200 bg-rose-50/50'
+              : 'border-stone-100 bg-white shadow-sm'
+        }`}
+      >
+        <p className="mb-4 text-center text-xs font-medium text-stone-400">
+          聽這句，補上挖空的字
+        </p>
+        <p className="text-center font-display text-xl leading-relaxed text-ink sm:text-2xl">
+          {words.map((w, wi) => {
+            if (wi !== current.wordIndex) {
+              return (
+                <span key={wi} className="mr-1.5 inline-block">
+                  {w}
+                </span>
+              );
+            }
+            const shown = isLocked ? userAnswer || '____' : userAnswer || '____';
+            return (
+              <span
+                key={wi}
+                className={`mr-1.5 mb-1 inline-flex min-w-[5rem] items-center justify-center rounded-lg border-b-2 px-2 py-0.5 text-lg sm:text-xl ${
+                  isCorrect
+                    ? 'border-emerald-500 bg-emerald-100 text-emerald-900'
+                    : isWrong
+                      ? 'border-rose-400 bg-rose-100 text-rose-900'
+                      : 'border-terracotta-500 bg-terracotta-50 text-terracotta-800'
+                }`}
+              >
+                {shown}
+              </span>
+            );
+          })}
+        </p>
+        <p className="mt-4 text-center text-sm text-stone-500">{currentLine.zh}</p>
 
-                return (
-                  <button
-                    key={wi}
-                    type="button"
-                    onClick={() => setActiveBlank(key)}
-                    className={`mr-1.5 mb-1 inline-flex min-w-[4.5rem] items-center justify-center rounded-lg border-b-2 px-1.5 py-0.5 text-sm transition ${
-                      isActive
-                        ? 'border-terracotta-500 bg-terracotta-50'
-                        : isCorrect
-                          ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
-                          : isWrong
-                            ? 'border-rose-400 bg-rose-50 text-rose-800'
-                            : 'border-stone-300 bg-stone-50 text-stone-400'
-                    }`}
-                  >
-                    {user || '____'}
-                  </button>
-                );
-              })}
-              <span className="ml-2 text-xs text-stone-400">（{line.zh}）</span>
-            </li>
-          );
-        })}
-      </ul>
-
-      {active && (
-        <div className="rounded-2xl border border-terracotta-100 bg-terracotta-50/40 p-4">
-          <p className="mb-2 text-xs font-medium text-terracotta-700">
-            填空：第 {song.cloze.findIndex((b) => blankKey(b) === activeBlank) + 1} / {total} 題
-          </p>
-          {mode === 'choice' && active.options ? (
-            <div className="grid grid-cols-2 gap-2">
-              {active.options.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setAnswer(blankKey(active), opt)}
-                  className={`rounded-xl border px-3 py-2.5 text-sm transition ${
-                    answers[blankKey(active)] === opt
-                      ? 'border-terracotta-500 bg-white font-medium text-terracotta-800 shadow-sm'
-                      : 'border-stone-200 bg-white text-stone-700 hover:border-terracotta-300'
-                  }`}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <input
-              type="text"
-              value={answers[blankKey(active)] ?? ''}
-              onChange={(e) => setAnswer(blankKey(active), e.target.value)}
-              placeholder="輸入義大利文…"
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-terracotta-400 focus:ring-2 focus:ring-terracotta-100"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={!activeBlank}
-              onClick={() => {
-                const idx = song.cloze.findIndex((b) => blankKey(b) === activeBlank);
-                if (idx >= 0 && idx < song.cloze.length - 1) {
-                  setActiveBlank(blankKey(song.cloze[idx + 1]));
-                }
-              }}
-              className="rounded-full bg-terracotta-500 px-4 py-1.5 text-sm text-white hover:bg-terracotta-600"
-            >
-              下一空
-            </button>
+        {isLocked && (
+          <div
+            className={`mt-5 rounded-xl px-4 py-3 text-center text-sm font-medium ${
+              isCorrect
+                ? 'bg-emerald-100 text-emerald-900'
+                : 'bg-rose-100 text-rose-900'
+            }`}
+            role="status"
+          >
+            {isCorrect ? (
+              <span>正確！</span>
+            ) : (
+              <span>
+                不對。正確答案是{' '}
+                <span className="font-display text-base">{current.answer}</span>
+              </span>
+            )}
           </div>
+        )}
+      </div>
+
+      {!isLocked && mode === 'choice' && current.options && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {current.options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => lockAnswer(opt)}
+              className="min-h-12 rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-base text-stone-800 shadow-sm transition hover:border-terracotta-400 hover:bg-terracotta-50"
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!isLocked && mode === 'type' && (
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            lockAnswer(draft);
+          }}
+        >
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="輸入義大利文…"
+            className="min-h-12 flex-1 rounded-xl border border-stone-200 bg-white px-4 py-3 text-base outline-none focus:border-terracotta-400 focus:ring-2 focus:ring-terracotta-100"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            autoFocus
+          />
+          <button
+            type="submit"
+            disabled={!draft.trim()}
+            className="min-h-12 rounded-xl bg-terracotta-700 px-5 py-3 text-base font-medium text-white transition enabled:hover:bg-terracotta-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            送出
+          </button>
+        </form>
+      )}
+
+      {isLocked && mode === 'choice' && current.options && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {current.options.map((opt) => {
+            const picked = userAnswer === opt;
+            const right = isAnswerCorrect(opt, current.answer);
+            let style =
+              'border-stone-200 bg-stone-50 text-stone-400';
+            if (right) {
+              style = 'border-emerald-400 bg-emerald-50 text-emerald-900';
+            } else if (picked) {
+              style = 'border-rose-300 bg-rose-50 text-rose-800';
+            }
+            return (
+              <div
+                key={opt}
+                className={`min-h-12 rounded-xl border px-4 py-3 text-left text-base ${style}`}
+              >
+                {opt}
+                {right ? ' ✓' : picked ? ' ✗' : ''}
+              </div>
+            );
+          })}
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => setChecked(true)}
-          className="rounded-full bg-ink px-4 py-2 text-sm text-white hover:bg-stone-800"
+          onClick={() => goTo(safeIndex - 1)}
+          disabled={safeIndex <= 0}
+          className="min-h-11 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 enabled:hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          核對答案
+          上一題
         </button>
         <button
           type="button"
-          onClick={revealAll}
-          className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600 hover:bg-stone-50"
+          onClick={() => goTo(safeIndex + 1)}
+          disabled={safeIndex >= total - 1}
+          className="min-h-11 rounded-full bg-terracotta-700 px-4 py-2 text-sm font-medium text-white enabled:hover:bg-terracotta-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          顯示全部答案
+          {safeIndex >= total - 1 ? '已是最後一題' : '下一題'}
         </button>
+        {!isLocked && (
+          <button
+            type="button"
+            onClick={revealCurrent}
+            className="min-h-11 rounded-full px-4 py-2 text-sm text-stone-500 hover:text-stone-700"
+          >
+            看答案
+          </button>
+        )}
         <button
           type="button"
           onClick={reset}
-          className="rounded-full px-4 py-2 text-sm text-stone-500 hover:text-stone-700"
+          className="min-h-11 rounded-full px-4 py-2 text-sm text-stone-500 hover:text-stone-700"
         >
           重來
         </button>
-        {score !== null && (
-          <span className="ml-auto rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800">
-            得分：{score} / {total}
-          </span>
-        )}
+      </div>
+
+      {allDone && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+          <p className="font-medium text-emerald-900">
+            全部完成！得分 {correctCount} / {total}
+          </p>
+          <button
+            type="button"
+            onClick={reset}
+            className="mt-3 rounded-full bg-emerald-800 px-4 py-2 text-sm text-white hover:bg-emerald-900"
+          >
+            再練一次
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap justify-center gap-1.5 pt-1">
+        {blanks.map((b, i) => {
+          const key = blankKey(b);
+          const done = !!locked[key];
+          const ok = done && isAnswerCorrect(answers[key] ?? '', b.answer);
+          const active = i === safeIndex;
+          return (
+            <button
+              key={key}
+              type="button"
+              title={`第 ${i + 1} 題`}
+              onClick={() => goTo(i)}
+              className={`h-2.5 w-2.5 rounded-full transition ${
+                active
+                  ? 'ring-2 ring-terracotta-400 ring-offset-1'
+                  : ''
+              } ${
+                done
+                  ? ok
+                    ? 'bg-emerald-500'
+                    : 'bg-rose-400'
+                  : 'bg-stone-300'
+              }`}
+              aria-label={`第 ${i + 1} 題`}
+            />
+          );
+        })}
       </div>
     </div>
   );
