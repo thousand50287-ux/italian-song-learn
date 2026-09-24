@@ -261,6 +261,7 @@ function SyncedSingMode({
   const [activeIndex, setActiveIndex] = useState(-1);
   const [playerReady, setPlayerReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [showList, setShowList] = useState(false);
 
   const playerRef = useRef<YTPlayer | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -373,9 +374,14 @@ function SyncedSingMode({
     };
   }, [youtubeId, startPolling, stopPolling, syncFromPlayer]);
 
-  // Keep highlight in view when line advances.
+  // Scroll only inside the lyrics list — never drag the whole page away from the video.
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const list = listRef.current;
+    const active = activeRef.current;
+    if (!list || !active) return;
+    const target =
+      active.offsetTop - list.clientHeight / 2 + active.clientHeight / 2;
+    list.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
   }, [activeIndex]);
 
   const currentHighlighted =
@@ -408,125 +414,136 @@ function SyncedSingMode({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-stone-200 bg-black shadow-sm">
-        <div className="relative aspect-video w-full">
-          <div ref={hostRef} className="absolute inset-0 h-full w-full" />
-          {!playerReady && !loadError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-stone-900/80 text-sm text-stone-200">
-              載入播放器中…
-            </div>
+      {/* Sticky watch zone: video + current line stay on screen while list scrolls inside itself */}
+      <div className="sticky top-14 z-30 space-y-3 bg-[var(--color-cream)]/95 pb-2 backdrop-blur-md sm:top-[3.75rem]">
+        <div className="overflow-hidden rounded-2xl border border-stone-200 bg-black shadow-sm">
+          <div className="relative aspect-video w-full">
+            <div ref={hostRef} className="absolute inset-0 h-full w-full" />
+            {!playerReady && !loadError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-stone-900/80 text-sm text-stone-200">
+                載入播放器中…
+              </div>
+            )}
+          </div>
+        </div>
+
+        {loadError && (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+            {loadError}
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setNudgeSec((n) => Math.round((n - NUDGE_SEC) * 10) / 10)}
+            className="min-h-11 rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:bg-stone-50 sm:text-sm"
+          >
+            歌詞提早 0.5 秒
+          </button>
+          <button
+            type="button"
+            onClick={() => setNudgeSec((n) => Math.round((n + NUDGE_SEC) * 10) / 10)}
+            className="min-h-11 rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:bg-stone-50 sm:text-sm"
+          >
+            歌詞延後 0.5 秒
+          </button>
+          <span className="text-xs text-stone-400">
+            微調 {totalOffset >= 0 ? '+' : ''}
+            {totalOffset.toFixed(1)} 秒
+            {nudgeSec !== 0 && (
+              <button
+                type="button"
+                className="ml-2 text-terracotta-700 underline"
+                onClick={() => setNudgeSec(0)}
+              >
+                重設
+              </button>
+            )}
+          </span>
+        </div>
+
+        <div
+          className={`rounded-2xl border px-4 py-5 text-center sm:px-6 sm:py-6 ${
+            currentHighlighted
+              ? 'border-amber-200 bg-amber-50/80'
+              : 'border-stone-100 bg-white/95 shadow-sm'
+          }`}
+          role="region"
+          aria-label={progressLabel}
+        >
+          <p className="mb-3 text-sm font-medium text-stone-400">{progressLabel}</p>
+
+          {prevLine && activeIndex >= 0 && (
+            <p className="mb-2 truncate text-sm text-stone-300 sm:text-base">{prevLine.it}</p>
+          )}
+
+          {current && activeIndex >= 0 ? (
+            <>
+              <LyricTokens
+                line={current}
+                song={song}
+                onSelect={onSelectWord}
+                className="font-display text-xl leading-relaxed text-ink sm:text-2xl"
+              />
+              <p className="mt-3 text-sm text-stone-600 sm:text-base">{current.zh}</p>
+            </>
+          ) : (
+            <p className="text-stone-500">
+              {playerReady ? '按下播放，歌詞會從第一句開始同步' : '等待播放器…'}
+            </p>
+          )}
+
+          {nextLine && activeIndex >= 0 && (
+            <p className="mt-2 truncate text-sm text-stone-300 sm:text-base">{nextLine.it}</p>
           )}
         </div>
       </div>
 
-      {loadError && (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-          {loadError}
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setNudgeSec((n) => Math.round((n - NUDGE_SEC) * 10) / 10)}
-          className="min-h-11 rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:bg-stone-50 sm:text-sm"
-        >
-          歌詞提早 0.5 秒
-        </button>
-        <button
-          type="button"
-          onClick={() => setNudgeSec((n) => Math.round((n + NUDGE_SEC) * 10) / 10)}
-          className="min-h-11 rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:bg-stone-50 sm:text-sm"
-        >
-          歌詞延後 0.5 秒
-        </button>
-        <span className="text-xs text-stone-400">
-          微調 {totalOffset >= 0 ? '+' : ''}
-          {totalOffset.toFixed(1)} 秒
-          {nudgeSec !== 0 && (
-            <button
-              type="button"
-              className="ml-2 text-terracotta-700 underline"
-              onClick={() => setNudgeSec(0)}
-            >
-              重設
-            </button>
-          )}
-        </span>
-      </div>
-
-      <div
-        className={`rounded-2xl border px-4 py-6 text-center sm:px-8 sm:py-8 ${
-          currentHighlighted
-            ? 'border-amber-200 bg-amber-50/50'
-            : 'border-stone-100 bg-white shadow-sm'
-        }`}
-        role="region"
-        aria-label={progressLabel}
-      >
-        <p className="mb-4 text-sm font-medium text-stone-400">{progressLabel}</p>
-
-        {prevLine && activeIndex >= 0 && (
-          <p className="mb-3 truncate text-sm text-stone-300 sm:text-base">{prevLine.it}</p>
-        )}
-
-        {current && activeIndex >= 0 ? (
-          <>
-            <LyricTokens
-              line={current}
-              song={song}
-              onSelect={onSelectWord}
-              className="font-display text-2xl leading-relaxed text-ink sm:text-3xl"
-            />
-            <p className="mt-4 text-base text-stone-600 sm:text-lg">{current.zh}</p>
-          </>
-        ) : (
-          <p className="text-stone-500">
-            {playerReady ? '按下播放，歌詞會從第一句開始同步' : '等待播放器…'}
-          </p>
-        )}
-
-        {nextLine && activeIndex >= 0 && (
-          <p className="mt-3 truncate text-sm text-stone-300 sm:text-base">{nextLine.it}</p>
-        )}
-      </div>
-
       <div>
-        <p className="mb-2 text-xs font-medium text-stone-500">歌詞進度</p>
-        <ul
-          ref={listRef}
-          className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-stone-100 bg-white p-2 sm:max-h-72"
+        <button
+          type="button"
+          onClick={() => setShowList((v) => !v)}
+          className="mb-2 text-xs font-medium text-stone-500 underline-offset-2 hover:text-terracotta-700 hover:underline"
         >
-          {lines.map((line, i) => {
-            const isActive = i === activeIndex;
-            const highlighted =
-              line.isKeyPhrase && line.keyPhraseId && keyPhraseIds.has(line.keyPhraseId);
-            return (
-              <li
-                key={line.id}
-                ref={isActive ? activeRef : undefined}
-                className={`rounded-lg px-3 py-2 transition ${
-                  isActive
-                    ? 'bg-terracotta-700 text-white shadow-sm'
-                    : highlighted
-                      ? 'bg-amber-50/80 text-stone-700'
-                      : 'text-stone-500 hover:bg-stone-50'
-                }`}
-              >
-                <p
-                  className={`font-display text-sm leading-snug sm:text-base ${
-                    isActive ? 'text-white' : 'text-ink'
+          {showList ? '收合全部歌詞進度' : '展開全部歌詞進度（選用）'}
+        </button>
+        {showList && (
+          <ul
+            ref={listRef}
+            className="max-h-48 space-y-1 overflow-y-auto overscroll-contain rounded-xl border border-stone-100 bg-white p-2 sm:max-h-56"
+          >
+            {lines.map((line, i) => {
+              const isActive = i === activeIndex;
+              const highlighted =
+                line.isKeyPhrase && line.keyPhraseId && keyPhraseIds.has(line.keyPhraseId);
+              return (
+                <li
+                  key={line.id}
+                  ref={isActive ? activeRef : undefined}
+                  className={`rounded-lg px-3 py-2 transition ${
+                    isActive
+                      ? 'bg-terracotta-700 text-white shadow-sm'
+                      : highlighted
+                        ? 'bg-amber-50/80 text-stone-700'
+                        : 'text-stone-500 hover:bg-stone-50'
                   }`}
                 >
-                  {line.it}
-                </p>
-                <p className={`text-xs ${isActive ? 'text-terracotta-100' : 'text-stone-400'}`}>
-                  {line.zh}
-                </p>
-              </li>
-            );
-          })}
-        </ul>
+                  <p
+                    className={`font-display text-sm leading-snug sm:text-base ${
+                      isActive ? 'text-white' : 'text-ink'
+                    }`}
+                  >
+                    {line.it}
+                  </p>
+                  <p className={`text-xs ${isActive ? 'text-terracotta-100' : 'text-stone-400'}`}>
+                    {line.zh}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <p className="text-xs leading-relaxed text-stone-400">
